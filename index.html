@@ -1,82 +1,214 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>간이 웹 OCR 도구</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
-        #result { white-space: pre-wrap; background: #f4f4f4; padding: 15px; border-radius: 5px; min-height: 100px; border: 1px solid #ddd; }
-        .controls { margin-bottom: 20px; }
-        #preview { max-width: 300px; display: block; margin-top: 10px; border: 1px dashed #ccc; }
-        .loading { color: blue; font-weight: bold; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>스마트 급식 시스템 (Local OCR)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
+  
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #FF6B35; --primary-light: #fff0e8; --secondary: #F7C59F;
+      --accent: #1A1A2E; --bg: #FFF8F3; --card: #FFFFFF;
+      --muted: #8B7355; --success: #4CAF50; --danger: #E53935;
+    }
+    html, body { height: 100%; background: var(--bg); font-family: 'Noto Sans KR', sans-serif; color: var(--accent); }
+    #app { max-width: 480px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
+    
+    /* UI 요소들 */
+    .header { background: var(--accent); color: white; padding: 18px 24px 15px; display: flex; align-items: center; gap: 12px; box-shadow: 0 4px 24px rgba(26,26,46,0.35); }
+    .user-bar { background: var(--accent); padding: 0 24px 16px; color: white; display: flex; align-items: center; gap: 12px; }
+    .user-avatar { width: 38px; height: 38px; background: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .content { padding: 20px 16px 40px; flex: 1; display: flex; flex-direction: column; gap: 16px; }
+    .card { background: var(--card); border-radius: 20px; padding: 24px; box-shadow: 0 2px 16px rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.04); }
+    .card.center { text-align: center; display: flex; flex-direction: column; align-items: center; }
+    .card-title { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+
+    /* 버튼 및 상태 */
+    .btn { padding: 14px 28px; border-radius: 14px; font-size: 15px; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 16px rgba(255,107,53,0.35); }
+    .btn-full { width: 100%; margin-top: 8px; }
+    
+    /* OCR 비디오 영역 */
+    .ocr-video-wrap { width: 100%; aspect-ratio: 4/3; background: var(--accent); border-radius: 16px; overflow: hidden; position: relative; margin-bottom: 16px; }
+    .ocr-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
+    .scan-line { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--primary); animation: scanDown 2s infinite; }
+    @keyframes scanDown { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
+    
+    .ocr-status-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; color: white; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+    .ocr-spinner { width: 14px; height: 14px; border: 2px solid #fff; border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .ocr-result-box { width: 100%; background: var(--primary-light); border: 2px solid var(--secondary); border-radius: 14px; padding: 14px; display: none; margin-bottom: 14px; }
+    .ocr-result-box.visible { display: block; }
+    .ocr-result-name { font-size: 24px; font-weight: 900; }
+
+    /* 페이지 제어 */
+    .page { display: none; }
+    .page.active { display: block; animation: fadeUp 0.4s ease; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* 배식 카운트 관련 스타일 생략 (기존 유지) */
+    .btn-count { width: 50px; height: 50px; border-radius: 13px; background: #f5f0eb; border:none; font-weight: 700; cursor: pointer; }
+    .btn-count.active { background: var(--primary); color: white; }
+    .count-display { font-size: 60px; font-weight: 700; font-family: 'Space Grotesk'; }
+  </style>
 </head>
 <body>
+<div id="app">
+  <div class="header">
+    <div class="header-logo">🍱</div>
+    <div><div class="header-title">스마트 급식 시스템</div><div class="header-sub">LOCAL OCR ENGINE</div></div>
+  </div>
 
-    <h2>🖼️ 웹 이미지 텍스트 추출 (OCR)</h2>
-    
-    <div class="controls">
-        <input type="file" id="imageInput" accept="image/*">
-        <p>지원 언어: <strong>한국어(kor) + 영어(eng)</strong></p>
+  <div class="user-bar">
+    <div class="user-avatar">👤</div>
+    <div><div id="bar-name" class="user-name">인식 대기 중</div><div id="bar-sub" class="user-sub">이름표를 비춰주세요</div></div>
+  </div>
+
+  <div class="content">
+    <div class="page active" id="page-recognition">
+      <div class="card center">
+        <div class="card-title">🔍 학생증 인식</div>
+        <div class="ocr-video-wrap">
+          <video id="video-recog" autoplay muted playsinline></video>
+          <div class="scan-line"></div>
+          <div id="ocr-status-bar" class="ocr-status-bar" style="display:none;">
+            <div class="ocr-spinner"></div> <span id="ocr-status-text">엔진 로드 중...</span>
+          </div>
+        </div>
+        <div class="ocr-result-box" id="ocr-result-box">
+          <div style="font-size:11px; color:var(--muted);">인식된 이름</div>
+          <div class="ocr-result-name" id="ocr-result-name">—</div>
+        </div>
+        <button class="btn btn-primary btn-full" id="btn-capture" onclick="captureAndOCR()">📷 사진 찍어 이름 인식</button>
+        <button class="btn btn-full" style="background:none; color:var(--muted);" onclick="skipRecognition()">이름 없이 계속하기 →</button>
+      </div>
     </div>
 
-    <img id="preview" src="" alt="이미지 미리보기" style="display:none;">
-    
-    <h3>추출 결과:</h3>
-    <div id="status" class="loading"></div>
-    <div id="result">이미지를 선택하면 이곳에 텍스트가 표시됩니다.</div>
+    <div class="page" id="page-dashboard">
+      <div class="card">
+        <div class="card-title">🍽️ 오늘의 메뉴</div>
+        <p>🍚 밥, 🍲 국, 🥘 제육볶음, 🥬 김치</p>
+        <button class="btn btn-primary btn-full" style="margin-top:20px" onclick="goPage('serve')">배식 시작하기</button>
+      </div>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <div class="page" id="page-serve">
+      <div class="card center">
+        <div class="card-title">🥢 배식 횟수 선택</div>
+        <div class="count-display" id="serve-count-display">0</div>
+        <div style="display:flex; gap:10px; margin:20px 0;">
+          <button class="btn-count" onclick="setCount(1)">1</button>
+          <button class="btn-count" onclick="setCount(2)">2</button>
+          <button class="btn-count" onclick="setCount(3)">3</button>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="resetAll()">배식 완료</button>
+      </div>
+    </div>
+  </div>
+  <canvas id="ocr-canvas" style="display:none;"></canvas>
+</div>
 
-    <script>
-        const imageInput = document.getElementById('imageInput');
-        const preview = document.getElementById('preview');
-        const resultDiv = document.getElementById('result');
-        const statusDiv = document.getElementById('status');
+<script>
+  let recogStream = null;
 
-        imageInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+  // 1. 카메라 시작
+  async function initCamera() {
+    const video = document.getElementById('video-recog');
+    try {
+      recogStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video.srcObject = recogStream;
+    } catch (e) { console.error("Camera Error", e); }
+  }
 
-            // 1. 이미지 미리보기 처리
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                preview.src = event.target.result;
-                preview.style.display = 'block';
-                
-                // 2. OCR 실행
-                recognizeText(event.target.result);
-            };
-            reader.readAsDataURL(file);
-        });
+  // 2. 로컬 OCR (Tesseract.js / Tensor 기반) 로직
+  async function captureAndOCR() {
+    const video = document.getElementById('video-recog');
+    const canvas = document.getElementById('ocr-canvas');
+    const btn = document.getElementById('btn-capture');
+    const statusText = document.getElementById('ocr-status-text');
+    const statusBar = document.getElementById('ocr-status-bar');
 
-        async function recognizeText(imageSrc) {
-            statusDiv.textContent = '텍스트를 분석 중입니다... 잠시만 기다려주세요.';
-            resultDiv.textContent = '';
+    btn.disabled = true;
+    btn.textContent = '분석 중...';
+    statusBar.style.display = 'flex';
+    statusText.textContent = '로컬 엔진 초기화 중...';
 
-            try {
-                // Tesseract 실행 (한국어와 영어 동시 인식)
-                const result = await Tesseract.recognize(
-                    imageSrc,
-                    'kor+eng', 
-                    { logger: m => {
-                        if(m.status === 'recognizing text') {
-                            statusDiv.textContent = `인식 진행률: ${Math.round(m.progress * 100)}%`;
-                        }
-                    }}
-                );
+    // 캔버스에 캡처
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
 
-                // 3. 결과 출력
-                statusDiv.textContent = '인식 완료!';
-                resultDiv.textContent = result.data.text;
-            } catch (error) {
-                console.error(error);
-                statusDiv.textContent = '오류가 발생했습니다.';
-                resultDiv.textContent = '인식에 실패했습니다.';
-            }
-        }
-    </script>
+    try {
+      // Tesseract Worker 생성 (한글+영어)
+      const worker = await Tesseract.createWorker('kor+eng');
+      
+      statusText.textContent = '문자 판독 중...';
+      const { data: { text } } = await worker.recognize(canvas);
+      await worker.terminate();
+
+      // 이름 정제 (한글 2~4자 추출 시도)
+      const cleaned = text.replace(/\s+/g, '');
+      const match = cleaned.match(/[가-힣]{2,4}/);
+      const name = match ? match[0] : "알수없음";
+
+      document.getElementById('ocr-result-name').textContent = name;
+      document.getElementById('ocr-result-box').classList.add('visible');
+      
+      btn.disabled = false;
+      btn.textContent = '✅ ' + name + ' (다시 찍기)';
+      document.getElementById('bar-name').textContent = name;
+      
+      // 확인 후 대시보드로 이동할 수 있게 버튼 변경
+      btn.onclick = () => {
+        document.getElementById('bar-name').textContent = name;
+        document.getElementById('bar-sub').textContent = "인증 완료";
+        goPage('dashboard');
+      };
+
+    } catch (err) {
+      console.error(err);
+      statusText.textContent = '인식 실패';
+      btn.disabled = false;
+    } finally {
+      setTimeout(() => statusBar.style.display = 'none', 2000);
+    }
+  }
+
+  // 페이지 이동 함수
+  function goPage(id) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + id).classList.add('active');
+  }
+
+  function skipRecognition() {
+    document.getElementById('bar-name').textContent = "게스트";
+    goPage('dashboard');
+  }
+
+  function setCount(n) {
+    document.getElementById('serve-count-display').textContent = n;
+    document.querySelectorAll('.btn-count').forEach(b => b.classList.toggle('active', b.textContent == n));
+  }
+
+  function resetAll() {
+    alert('배식이 완료되었습니다!');
+    location.reload();
+  }
+
+  function resetOCR() {
+      document.getElementById('btn-capture').onclick = captureAndOCR;
+      document.getElementById('ocr-result-box').classList.remove('visible');
+  }
+
+  initCamera();
+</script>
 </body>
 </html>
-
