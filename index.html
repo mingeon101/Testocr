@@ -1,106 +1,506 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>스마트 급식 시스템 (Local OCR)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
-  
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OCR — 이미지에서 텍스트 추출</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #13131a;
+    --surface2: #1c1c28;
+    --border: #2a2a3d;
+    --accent: #7c6cff;
+    --accent2: #ff6cb2;
+    --text: #e8e8f0;
+    --muted: #6b6b88;
+    --success: #4ade80;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Noto Sans KR', sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  }
+  body::before {
+    content: ''; position: fixed; top: -200px; left: 50%;
+    transform: translateX(-50%); width: 600px; height: 600px;
+    background: radial-gradient(ellipse, rgba(124,108,255,0.12) 0%, transparent 70%);
+    pointer-events: none; z-index: 0;
+  }
+  header { width: 100%; max-width: 800px; padding: 48px 24px 0; position: relative; z-index: 1; }
+  .logo { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .logo-text {
+    font-family: 'Space Mono', monospace; font-size: 28px; font-weight: 700; letter-spacing: -1px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .logo-badge {
+    font-family: 'Space Mono', monospace; font-size: 10px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted); padding: 2px 8px; border-radius: 20px; letter-spacing: 1px;
+  }
+  .subtitle { color: var(--muted); font-size: 14px; font-weight: 300; }
+  main {
+    width: 100%; max-width: 800px; padding: 32px 24px 60px;
+    display: flex; flex-direction: column; gap: 20px; position: relative; z-index: 1;
+  }
 
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --primary: #FF6B35; --primary-light: #fff0e8; --secondary: #F7C59F;
-      --accent: #1A1A2E; --bg: #FFF8F3; --card: #FFFFFF;
-      --muted: #8B7355; --success: #4CAF50; --danger: #E53935;
-    }
-    html, body { height: 100%; background: var(--bg); font-family: 'Noto Sans KR', sans-serif; color: var(--accent); }
-    #app { max-width: 480px; margin: 0 auto; min-height: 100vh; display: flex; flex-direction: column; }
-    
-    /* UI 요소들 */
-    .header { background: var(--accent); color: white; padding: 18px 24px 15px; display: flex; align-items: center; gap: 12px; box-shadow: 0 4px 24px rgba(26,26,46,0.35); }
-    .user-bar { background: var(--accent); padding: 0 24px 16px; color: white; display: flex; align-items: center; gap: 12px; }
-    .user-avatar { width: 38px; height: 38px; background: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; }
-    .content { padding: 20px 16px 40px; flex: 1; display: flex; flex-direction: column; gap: 16px; }
-    .card { background: var(--card); border-radius: 20px; padding: 24px; box-shadow: 0 2px 16px rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.04); }
-    .card.center { text-align: center; display: flex; flex-direction: column; align-items: center; }
-    .card-title { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  /* Drop Zone */
+  .drop-zone {
+    border: 2px dashed var(--border); border-radius: var(--radius);
+    background: var(--surface); padding: 52px 32px;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+    cursor: pointer; transition: all 0.25s ease; position: relative; overflow: hidden;
+  }
+  .drop-zone::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(124,108,255,0.04), rgba(255,108,178,0.04));
+    opacity: 0; transition: opacity 0.25s;
+  }
+  .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: var(--surface2); }
+  .drop-zone:hover::after, .drop-zone.dragover::after { opacity: 1; }
+  .drop-icon {
+    width: 56px; height: 56px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 16px; display: flex; align-items: center; justify-content: center;
+    font-size: 26px; transition: transform 0.25s;
+  }
+  .drop-zone:hover .drop-icon { transform: scale(1.1) translateY(-2px); }
+  .drop-title { font-size: 16px; font-weight: 700; }
+  .drop-sub { font-size: 13px; color: var(--muted); text-align: center; line-height: 1.6; }
+  .btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; position: relative; z-index: 1; }
+  .drop-btn {
+    background: linear-gradient(135deg, var(--accent), #5e4fff); color: #fff;
+    border: none; border-radius: 8px; padding: 10px 24px;
+    font-family: 'Noto Sans KR', sans-serif; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: opacity 0.2s, transform 0.2s;
+  }
+  .drop-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+  .camera-btn {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 24px;
+    font-family: 'Noto Sans KR', sans-serif; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .camera-btn:hover { border-color: var(--accent2); color: var(--accent2); transform: translateY(-1px); }
+  #fileInput { display: none; }
 
-    /* 버튼 및 상태 */
-    .btn { padding: 14px 28px; border-radius: 14px; font-size: 15px; font-weight: 700; cursor: pointer; border: none; transition: all 0.2s; }
-    .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 16px rgba(255,107,53,0.35); }
-    .btn-full { width: 100%; margin-top: 8px; }
-    
-    /* OCR 비디오 영역 */
-    .ocr-video-wrap { width: 100%; aspect-ratio: 4/3; background: var(--accent); border-radius: 16px; overflow: hidden; position: relative; margin-bottom: 16px; }
-    .ocr-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
-    .scan-line { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--primary); animation: scanDown 2s infinite; }
-    @keyframes scanDown { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
-    
-    .ocr-status-bar { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px 16px; border-radius: 20px; color: white; font-size: 12px; display: flex; align-items: center; gap: 8px; }
-    .ocr-spinner { width: 14px; height: 14px; border: 2px solid #fff; border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+  /* Language bar */
+  .lang-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .lang-label { font-size: 13px; color: var(--muted); }
+  .lang-btn {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--muted); font-family: 'Noto Sans KR', sans-serif;
+    font-size: 13px; padding: 7px 14px; cursor: pointer; transition: all 0.2s;
+  }
+  .lang-btn:hover { border-color: var(--accent); color: var(--text); }
+  .lang-btn.active { background: rgba(124,108,255,0.15); border-color: var(--accent); color: var(--accent); font-weight: 700; }
 
-    .ocr-result-box { width: 100%; background: var(--primary-light); border: 2px solid var(--secondary); border-radius: 14px; padding: 14px; display: none; margin-bottom: 14px; }
-    .ocr-result-box.visible { display: block; }
-    .ocr-result-name { font-size: 24px; font-weight: 900; }
+  /* Preview */
+  .preview-section {
+    display: none; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  }
+  .preview-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
+  }
+  .preview-label {
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
+  }
+  .clear-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); font-size: 12px; padding: 4px 12px;
+    cursor: pointer; transition: all 0.2s; font-family: 'Noto Sans KR', sans-serif;
+  }
+  .clear-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  .preview-img-wrap { padding: 16px; display: flex; justify-content: center; background: #050508; }
+  #previewImg { max-width: 100%; max-height: 320px; border-radius: 8px; object-fit: contain; display: block; }
 
-    /* 페이지 제어 */
-    .page { display: none; }
-    .page.active { display: block; animation: fadeUp 0.4s ease; }
-    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  /* Extract button */
+  .extract-btn {
+    width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff; border: none; border-radius: var(--radius); padding: 16px;
+    font-family: 'Noto Sans KR', sans-serif; font-size: 16px; font-weight: 700;
+    cursor: pointer; transition: all 0.25s; position: relative; overflow: hidden;
+  }
+  .extract-btn::before { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.1); opacity: 0; transition: opacity 0.2s; }
+  .extract-btn:hover::before { opacity: 1; }
+  .extract-btn:active { transform: scale(0.99); }
+  .extract-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
-    /* 배식 카운트 관련 스타일 생략 (기존 유지) */
-    .btn-count { width: 50px; height: 50px; border-radius: 13px; background: #f5f0eb; border:none; font-weight: 700; cursor: pointer; }
-    .btn-count.active { background: var(--primary); color: white; }
-    .count-display { font-size: 60px; font-weight: 700; font-family: 'Space Grotesk'; }
-  </style>
+  /* Loading */
+  .loading {
+    display: none; flex-direction: column; align-items: center; gap: 14px; padding: 28px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--muted); font-size: 14px;
+  }
+  .progress-wrap { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .progress-bar {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 2px; transition: width 0.3s ease;
+  }
+  .progress-text { font-size: 12px; color: var(--muted); }
+
+  /* Error */
+  .error-box {
+    display: none; padding: 16px 20px;
+    background: rgba(255,80,80,0.08); border: 1px solid rgba(255,80,80,0.25);
+    border-radius: var(--radius); color: #ff8080; font-size: 13px; line-height: 1.6;
+  }
+
+  /* Result */
+  .result-section {
+    display: none; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  }
+  .result-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
+  }
+  .result-label {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
+  }
+  .result-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .copy-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); font-size: 12px; padding: 4px 12px;
+    cursor: pointer; transition: all 0.2s; font-family: 'Noto Sans KR', sans-serif;
+  }
+  .copy-btn:hover { border-color: var(--success); color: var(--success); }
+  #resultText {
+    padding: 20px; font-size: 14px; line-height: 1.9; color: var(--text);
+    white-space: pre-wrap; word-break: break-word;
+    font-family: 'Space Mono', monospace; max-height: 420px; overflow-y: auto;
+  }
+  #resultText::-webkit-scrollbar { width: 6px; }
+  #resultText::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  .confidence { font-size: 12px; color: var(--muted); padding: 0 20px 14px; }
+  .conf-high { color: var(--success); } .conf-mid { color: #facc15; } .conf-low { color: #f97316; }
+
+  /* Camera */
+  .camera-section {
+    display: none; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  }
+  .camera-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
+  }
+  .camera-label {
+    font-family: 'Space Mono', monospace; font-size: 11px;
+    color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4444; box-shadow: 0 0 8px #ff4444; animation: pulse 1s infinite; }
+  .close-camera-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); font-size: 12px; padding: 4px 12px;
+    cursor: pointer; transition: all 0.2s; font-family: 'Noto Sans KR', sans-serif;
+  }
+  .close-camera-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+  .camera-body { position: relative; background: #000; display: flex; justify-content: center; }
+  #cameraVideo { width: 100%; max-height: 380px; object-fit: cover; display: block; }
+  .cam-guides { position: absolute; inset: 16px; pointer-events: none; }
+  .cam-guides::before,.cam-guides::after,.cam-guides span::before,.cam-guides span::after {
+    content: ''; position: absolute; width: 28px; height: 28px; border-color: var(--accent); border-style: solid;
+  }
+  .cam-guides::before{top:0;left:0;border-width:2px 0 0 2px}
+  .cam-guides::after{top:0;right:0;border-width:2px 2px 0 0}
+  .cam-guides span::before{bottom:0;left:0;border-width:0 0 2px 2px}
+  .cam-guides span::after{bottom:0;right:0;border-width:0 2px 2px 0}
+  .shutter-wrap {
+    padding: 20px; display: flex; justify-content: center;
+    background: var(--surface); border-top: 1px solid var(--border); gap: 20px; align-items: center;
+  }
+  .shutter-btn {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none; cursor: pointer; position: relative; transition: transform 0.15s;
+    box-shadow: 0 0 20px rgba(124,108,255,0.4);
+  }
+  .shutter-btn::after { content:'';position:absolute;inset:5px;border-radius:50%;background:rgba(255,255,255,0.15); }
+  .shutter-btn:hover { transform: scale(1.08); } .shutter-btn:active { transform: scale(0.95); }
+  .flip-btn {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 50%;
+    width: 44px; height: 44px; color: var(--muted); font-size: 20px;
+    cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center;
+  }
+  .flip-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #captureCanvas { display: none; }
+
+  .toast {
+    position: fixed; bottom: 32px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 20px; border-radius: 30px;
+    font-size: 13px; opacity: 0; transition: all 0.3s; z-index: 999;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
 </head>
 <body>
-<div id="app">
-  <div class="header">
-    <div class="header-logo">🍱</div>
-    <div><div class="header-title">스마트 급식 시스템</div><div class="header-sub">LOCAL OCR ENGINE</div></div>
+
+<header>
+  <div class="logo">
+    <span class="logo-text">OCR.AI</span>
+    <span class="logo-badge">TESSERACT.JS · 무료</span>
+  </div>
+  <p class="subtitle">브라우저에서 직접 처리 — API 없음, 서버 전송 없음, 완전 무료</p>
+</header>
+
+<main>
+  <!-- Drop Zone -->
+  <div class="drop-zone" id="dropZone">
+    <div class="drop-icon">🖼️</div>
+    <div class="drop-title">이미지를 드래그하거나 버튼을 눌러주세요</div>
+    <div class="drop-sub">PNG · JPG · WEBP · BMP · GIF 지원<br>모든 처리는 내 브라우저 안에서만 이루어집니다</div>
+    <div class="btn-row">
+      <button class="camera-btn" onclick="openCamera()">📷 카메라로 찍기</button>
+      <button class="drop-btn" onclick="document.getElementById('fileInput').click()">📁 파일 선택</button>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
   </div>
 
-  <div class="user-bar">
-    <div class="user-avatar">👤</div>
-    <div><div id="bar-name" class="user-name">인식 대기 중</div><div id="bar-sub" class="user-sub">이름표를 비춰주세요</div></div>
+  <!-- Camera -->
+  <div class="camera-section" id="cameraSection">
+    <div class="camera-header">
+      <div class="camera-label"><div class="rec-dot"></div> 카메라</div>
+      <button class="close-camera-btn" onclick="closeCamera()">✕ 닫기</button>
+    </div>
+    <div class="camera-body">
+      <video id="cameraVideo" autoplay playsinline muted></video>
+      <div class="cam-guides"><span></span></div>
+    </div>
+    <div class="shutter-wrap">
+      <button class="flip-btn" onclick="flipCamera()">🔄</button>
+      <button class="shutter-btn" onclick="capturePhoto()"></button>
+      <div style="width:44px"></div>
+    </div>
+  </div>
+  <canvas id="captureCanvas"></canvas>
+
+  <!-- Preview -->
+  <div class="preview-section" id="previewSection">
+    <div class="preview-header">
+      <span class="preview-label">미리보기</span>
+      <button class="clear-btn" id="clearBtn">✕ 제거</button>
+    </div>
+    <div class="preview-img-wrap">
+      <img id="previewImg" src="" alt="미리보기">
+    </div>
   </div>
 
-  <div class="content">
-    <div class="page active" id="page-recognition">
-      <div class="card center">
-        <div class="card-title">🔍 학생증 인식</div>
-        <div class="ocr-video-wrap">
-          <video id="video-recog" autoplay muted playsinline></video>
-          <div class="scan-line"></div>
-          <div id="ocr-status-bar" class="ocr-status-bar" style="display:none;">
-            <div class="ocr-spinner"></div> <span id="ocr-status-text">엔진 로드 중...</span>
-          </div>
-        </div>
-        <div class="ocr-result-box" id="ocr-result-box">
-          <div style="font-size:11px; color:var(--muted);">인식된 이름</div>
-          <div class="ocr-result-name" id="ocr-result-name">—</div>
-        </div>
-        <button class="btn btn-primary btn-full" id="btn-capture" onclick="captureAndOCR()">📷 사진 찍어 이름 인식</button>
-        <button class="btn btn-full" style="background:none; color:var(--muted);" onclick="skipRecognition()">이름 없이 계속하기 →</button>
-      </div>
-    </div>
+  <!-- Lang Selector -->
+  <div class="lang-bar" id="langBar" style="display:none">
+    <span class="lang-label">🌐 인식 언어:</span>
+    <button class="lang-btn active" data-lang="kor+eng">🇰🇷 한+영</button>
+    <button class="lang-btn" data-lang="eng">🇺🇸 영어</button>
+    <button class="lang-btn" data-lang="jpn">🇯🇵 일본어</button>
+    <button class="lang-btn" data-lang="chi_sim">🇨🇳 중국어</button>
+  </div>
 
-    <div class="page" id="page-dashboard">
-      <div class="card">
-        <div class="card-title">🍽️ 오늘의 메뉴</div>
-        <p>🍚 밥, 🍲 국, 🥘 제육볶음, 🥬 김치</p>
-        <button class="btn btn-primary btn-full" style="margin-top:20px" onclick="goPage('serve')">배식 시작하기</button>
-      </div>
-    </div>
+  <!-- Extract Button -->
+  <button class="extract-btn" id="extractBtn" style="display:none" onclick="runOCR()">
+    텍스트 추출하기
+  </button>
 
-    <div class="page" id="page-serve">
+  <!-- Loading -->
+  <div class="loading" id="loading">
+    <span id="loadingMsg">준비 중...</span>
+    <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+    <span class="progress-text" id="progressPct">0%</span>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box" id="errorBox"></div>
+
+  <!-- Result -->
+  <div class="result-section" id="resultSection">
+    <div class="result-header">
+      <div class="result-label"><div class="result-dot"></div> 추출 결과</div>
+      <button class="copy-btn" onclick="copyText()">📋 복사</button>
+    </div>
+    <div id="resultText"></div>
+    <div class="confidence" id="confBadge"></div>
+  </div>
+</main>
+
+<div class="toast" id="toast">클립보드에 복사됐어요!</div>
+
+<script>
+  let currentImage = null;
+  let currentLang = 'kor+eng';
+  let cameraStream = null;
+  let facingMode = 'environment';
+
+  // File / Drop
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) loadFile(f);
+  });
+  dropZone.addEventListener('click', e => {
+    if (!e.target.classList.contains('drop-btn') && !e.target.classList.contains('camera-btn'))
+      fileInput.click();
+  });
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+  function loadFile(file) {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { currentImage = img; showPreview(url); };
+    img.src = url;
+  }
+
+  function showPreview(src) {
+    document.getElementById('previewImg').src = src;
+    document.getElementById('previewSection').style.display = 'block';
+    document.getElementById('langBar').style.display = 'flex';
+    document.getElementById('extractBtn').style.display = 'block';
+    document.getElementById('resultSection').style.display = 'none';
+    document.getElementById('errorBox').style.display = 'none';
+  }
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    currentImage = null; fileInput.value = '';
+    ['previewSection','langBar','extractBtn','resultSection','errorBox'].forEach(id => {
+      const el = document.getElementById(id);
+      el.style.display = id === 'langBar' || id === 'extractBtn' ? 'none' : 'none';
+    });
+    document.getElementById('previewSection').style.display = 'none';
+    document.getElementById('langBar').style.display = 'none';
+    document.getElementById('extractBtn').style.display = 'none';
+    document.getElementById('resultSection').style.display = 'none';
+    document.getElementById('errorBox').style.display = 'none';
+  });
+
+  // Language
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentLang = btn.dataset.lang;
+    });
+  });
+
+  // Camera
+  async function openCamera() {
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      });
+      document.getElementById('cameraVideo').srcObject = cameraStream;
+      document.getElementById('cameraSection').style.display = 'block';
+      setTimeout(() => document.getElementById('cameraSection').scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
+    } catch (err) { alert('카메라 오류: ' + err.message); }
+  }
+
+  function closeCamera() {
+    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+    document.getElementById('cameraSection').style.display = 'none';
+  }
+
+  async function flipCamera() {
+    facingMode = facingMode === 'environment' ? 'user' : 'environment';
+    await openCamera();
+  }
+
+  function capturePhoto() {
+    const video = document.getElementById('cameraVideo');
+    const canvas = document.getElementById('captureCanvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    currentImage = canvas;
+    showPreview(canvas.toDataURL('image/jpeg', 0.92));
+    closeCamera();
+    setTimeout(() => document.getElementById('previewSection').scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
+  }
+
+  // OCR via Tesseract.js
+  async function runOCR() {
+    if (!currentImage) return;
+    const loading = document.getElementById('loading');
+    const progressBar = document.getElementById('progressBar');
+    const progressPct = document.getElementById('progressPct');
+    const loadingMsg = document.getElementById('loadingMsg');
+    const errorBox = document.getElementById('errorBox');
+    const resultSection = document.getElementById('resultSection');
+    const extractBtn = document.getElementById('extractBtn');
+
+    loading.style.display = 'flex';
+    resultSection.style.display = 'none';
+    errorBox.style.display = 'none';
+    extractBtn.disabled = true;
+    progressBar.style.width = '0%';
+
+    try {
+      const worker = await Tesseract.createWorker(currentLang, 1, {
+        logger: m => {
+          const msgs = {
+            'loading tesseract core': 'Tesseract 코어 로딩 중...',
+            'loading language traineddata': '언어 데이터 로딩 중...',
+            'initializing tesseract': '초기화 중...',
+            'initializing api': '준비 중...',
+            'recognizing text': '텍스트 인식 중...'
+          };
+          if (msgs[m.status]) loadingMsg.textContent = msgs[m.status];
+          if (m.progress != null) {
+            const p = Math.round(m.progress * 100);
+            progressBar.style.width = p + '%';
+            progressPct.textContent = p + '%';
+          }
+        }
+      });
+
+      const { data } = await worker.recognize(currentImage);
+      await worker.terminate();
+
+      document.getElementById('resultText').textContent = data.text.trim() || '(인식된 텍스트가 없습니다)';
+
+      const conf = Math.round(data.confidence);
+      const cls = conf >= 80 ? 'conf-high' : conf >= 50 ? 'conf-mid' : 'conf-low';
+      document.getElementById('confBadge').innerHTML = `인식 정확도: <span class="${cls}">${conf}%</span>`;
+
+      resultSection.style.display = 'block';
+      setTimeout(() => resultSection.scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
+    } catch (err) {
+      errorBox.textContent = '오류: ' + err.message;
+      errorBox.style.display = 'block';
+    } finally {
+      loading.style.display = 'none';
+      extractBtn.disabled = false;
+    }
+  }
+
+  function copyText() {
+    navigator.clipboard.writeText(document.getElementById('resultText').textContent).then(() => {
+      const t = document.getElementById('toast');
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    });
+  }
+</script>
+</body>
+</html>
       <div class="card center">
         <div class="card-title">🥢 배식 횟수 선택</div>
         <div class="count-display" id="serve-count-display">0</div>
