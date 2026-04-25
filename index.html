@@ -2,70 +2,106 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>Gemini OCR Debug</title>
+    <title>Gemini 3.1 OCR Pro</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        #result { white-space: pre-wrap; background: #eee; padding: 15px; margin-top: 20px; border-left: 5px solid #333; }
-        .error { color: red; font-weight: bold; }
+        body { font-family: 'Pretendard', sans-serif; padding: 40px; background-color: #f0f2f5; color: #1c1e21; }
+        .card { max-width: 700px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
+        h1 { color: #0061ff; margin-bottom: 10px; }
+        .upload-area { border: 2px dashed #0061ff; padding: 20px; text-align: center; border-radius: 12px; margin: 20px 0; background: #f8fbff; }
+        #result { white-space: pre-wrap; background: #282c34; color: #abb2bf; padding: 20px; border-radius: 12px; font-size: 14px; margin-top: 20px; min-height: 150px; overflow-x: auto; }
+        button { background: #0061ff; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; width: 100%; }
+        button:hover { background: #0052d9; }
+        .status { margin-top: 10px; font-size: 0.9rem; color: #65676b; }
     </style>
 </head>
 <body>
-    <h1>Gemini OCR (Fixed)</h1>
-    <input type="file" id="imageInput" accept="image/*">
-    <button onclick="runOCR()">텍스트 추출</button>
-    <div id="result">결과가 여기에 표시됩니다.</div>
+    <div class="card">
+        <h1>Gemini 3.1 OCR</h1>
+        <p>최신 Gemini 3.1 모델로 이미지의 텍스트를 정밀하게 추출합니다.</p>
+        
+        <div class="upload-area">
+            <input type="file" id="imageInput" accept="image/*">
+        </div>
+        
+        <button onclick="runGemini3OCR()">텍스트 분석 시작</button>
+        
+        <div class="status" id="statusText">이미지를 업로드하고 버튼을 눌러주세요.</div>
+        <div id="result">추출된 결과가 여기에 표시됩니다.</div>
+    </div>
 
     <script>
+        // API 키 (노출 주의!)
         const API_KEY = "AIzaSyBlj3Vhwbys_DtlZI9mIlL76MiEe5AOWDI"; 
-        // v1beta 대신 v1을 시도해보고, 모델명도 확인합니다.
-        const API_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+        
+        /** * 2026년 기준 Gemini 3.1 엔드포인트 설정 
+         * 정식 출시(GA) 모델은 v1을 사용하지만, 
+         * 최신 프리뷰 기능을 포함한 Gemini 3.1은 v1beta가 가장 확실하게 작동합니다.
+         */
+        const MODEL_ID = "gemini-3.1-flash-lite-preview"; 
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${API_KEY}`;
 
-        async function fileToGenerativePart(file) {
-            const base64EncodedDataPromise = new Promise((resolve) => {
+        async function fileToData(file) {
+            return new Promise((resolve) => {
                 const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.onloadend = () => resolve({
+                    inline_data: { 
+                        data: reader.result.split(',')[1], 
+                        mime_type: file.type 
+                    }
+                });
                 reader.readAsDataURL(file);
             });
-            return { inline_data: { data: await base64EncodedDataPromise, mime_type: file.type } };
         }
 
-        async function runOCR() {
+        async function runGemini3OCR() {
             const fileInput = document.getElementById('imageInput');
             const resultDiv = document.getElementById('result');
+            const statusText = document.getElementById('statusText');
 
-            if (!fileInput.files[0]) return alert("파일을 선택하세요.");
+            if (!fileInput.files[0]) return alert("이미지 파일을 선택해 주세요.");
 
+            statusText.innerText = "Gemini 3.1 엔진이 이미지를 해독 중입니다...";
             resultDiv.innerText = "분석 중...";
 
             try {
-                const imagePart = await fileToGenerativePart(fileInput.files[0]);
+                const imagePart = await fileToData(fileInput.files[0]);
                 
                 const response = await fetch(API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        contents: [{ parts: [{ text: "이미지의 모든 텍스트를 추출해줘." }, imagePart] }]
+                        contents: [{
+                            parts: [
+                                { text: "이미지의 텍스트를 OCR하여 보여줘. 표나 서식이 있다면 그대로 유지하고, 글자만 있다면 깔끔하게 텍스트로만 출력해." },
+                                imagePart
+                            ]
+                        }],
+                        // Gemini 3.1의 높은 정밀도를 활용하기 위한 설정
+                        generationConfig: {
+                            temperature: 0.1,
+                            topP: 0.95
+                        }
                     })
                 });
 
                 const data = await response.json();
 
-                // 디버깅: API가 보낸 전체 응답을 콘솔에 찍어봅니다.
-                console.log("API Response:", data);
-
                 if (!response.ok) {
-                    throw new Error(`API 오류: ${data.error ? data.error.message : response.statusText}`);
+                    throw new Error(data.error ? data.error.message : "API 요청 실패");
                 }
 
                 if (data.candidates && data.candidates[0].content) {
-                    resultDiv.innerText = data.candidates[0].content.parts[0].text;
+                    const text = data.candidates[0].content.parts[0].text;
+                    resultDiv.innerText = text;
+                    statusText.innerText = "추출 완료!";
                 } else {
-                    resultDiv.innerHTML = `<span class="error">응답 구조에 문제가 있습니다. 콘솔을 확인하세요.</span>`;
+                    resultDiv.innerText = "텍스트를 추출할 수 없습니다. (차단된 콘텐츠이거나 데이터 없음)";
                 }
 
-            } catch (error) {
-                console.error("Error details:", error);
-                resultDiv.innerHTML = `<span class="error">오류 발생: ${error.message}</span>`;
+            } catch (err) {
+                console.error(err);
+                resultDiv.innerText = "에러 발생: " + err.message;
+                statusText.innerText = "오류가 발생했습니다.";
             }
         }
     </script>
