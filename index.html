@@ -1,614 +1,82 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OCR — 이미지에서 텍스트 추출</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
-<style>
-  :root {
-    --bg: #0a0a0f;
-    --surface: #13131a;
-    --surface2: #1c1c28;
-    --border: #2a2a3d;
-    --accent: #7c6cff;
-    --accent2: #ff6cb2;
-    --text: #e8e8f0;
-    --muted: #6b6b88;
-    --success: #4ade80;
-    --radius: 12px;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: var(--bg); color: var(--text);
-    font-family: 'Noto Sans KR', sans-serif;
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-  }
-  body::before {
-    content: ''; position: fixed; top: -200px; left: 50%;
-    transform: translateX(-50%); width: 600px; height: 600px;
-    background: radial-gradient(ellipse, rgba(124,108,255,0.12) 0%, transparent 70%);
-    pointer-events: none; z-index: 0;
-  }
-  header { width: 100%; max-width: 800px; padding: 48px 24px 0; position: relative; z-index: 1; }
-  .logo { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-  .logo-text {
-    font-family: 'Space Mono', monospace; font-size: 28px; font-weight: 700; letter-spacing: -1px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-  }
-  .logo-badge {
-    font-family: 'Space Mono', monospace; font-size: 10px;
-    background: var(--surface2); border: 1px solid var(--border);
-    color: var(--muted); padding: 2px 8px; border-radius: 20px; letter-spacing: 1px;
-  }
-  .subtitle { color: var(--muted); font-size: 14px; font-weight: 300; }
-  main {
-    width: 100%; max-width: 800px; padding: 32px 24px 60px;
-    display: flex; flex-direction: column; gap: 20px; position: relative; z-index: 1;
-  }
-
-  /* Drop Zone */
-  .drop-zone {
-    border: 2px dashed var(--border); border-radius: var(--radius);
-    background: var(--surface); padding: 52px 32px;
-    display: flex; flex-direction: column; align-items: center; gap: 16px;
-    cursor: pointer; transition: all 0.25s ease; position: relative; overflow: hidden;
-  }
-  .drop-zone::after {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(135deg, rgba(124,108,255,0.04), rgba(255,108,178,0.04));
-    opacity: 0; transition: opacity 0.25s;
-  }
-  .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: var(--surface2); }
-  .drop-zone:hover::after, .drop-zone.dragover::after { opacity: 1; }
-  .drop-icon {
-    width: 56px; height: 56px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 16px; display: flex; align-items: center; justify-content: center;
-    font-size: 26px; transition: transform 0.25s;
-  }
-  .drop-zone:hover .drop-icon { transform: scale(1.1) translateY(-2px); }
-  .drop-title { font-size: 16px; font-weight: 700; }
-  .drop-sub { font-size: 13px; color: var(--muted); text-align: center; line-height: 1.6; }
-  .btn-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; position: relative; z-index: 1; }
-  .drop-btn {
-    background: linear-gradient(135deg, var(--accent), #5e4fff); color: #fff;
-    border: none; border-radius: 8px; padding: 10px 24px;
-    font-family: 'Noto Sans KR', sans-serif; font-size: 14px; font-weight: 700;
-    cursor: pointer; transition: opacity 0.2s, transform 0.2s;
-  }
-  .drop-btn:hover { opacity: 0.9; transform: translateY(-1px); }
-  .camera-btn {
-    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-    border-radius: 8px; padding: 10px 24px;
-    font-family: 'Noto Sans KR', sans-serif; font-size: 14px; font-weight: 700;
-    cursor: pointer; transition: all 0.2s;
-  }
-  .camera-btn:hover { border-color: var(--accent2); color: var(--accent2); transform: translateY(-1px); }
-  #fileInput { display: none; }
-
-  /* Language bar */
-  .lang-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .lang-label { font-size: 13px; color: var(--muted); }
-  .lang-btn {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--muted); font-family: 'Noto Sans KR', sans-serif;
-    font-size: 13px; padding: 7px 14px; cursor: pointer; transition: all 0.2s;
-  }
-  .lang-btn:hover { border-color: var(--accent); color: var(--text); }
-  .lang-btn.active { background: rgba(124,108,255,0.15); border-color: var(--accent); color: var(--accent); font-weight: 700; }
-
-  /* Preview */
-  .preview-section {
-    display: none; background: var(--surface);
-    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
-  }
-  .preview-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
-  }
-  .preview-label {
-    font-family: 'Space Mono', monospace; font-size: 11px;
-    color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
-  }
-  .clear-btn {
-    background: none; border: 1px solid var(--border); border-radius: 6px;
-    color: var(--muted); font-size: 12px; padding: 4px 12px;
-    cursor: pointer; transition: all 0.2s; font-family: 'Noto Sans KR', sans-serif;
-  }
-  .clear-btn:hover { border-color: var(--accent2); color: var(--accent2); }
-  .preview-img-wrap { padding: 16px; display: flex; justify-content: center; background: #050508; }
-  #previewImg { max-width: 100%; max-height: 320px; border-radius: 8px; object-fit: contain; display: block; }
-
-  /* Extract button */
-  .extract-btn {
-    width: 100%; background: linear-gradient(135deg, var(--accent), var(--accent2));
-    color: #fff; border: none; border-radius: var(--radius); padding: 16px;
-    font-family: 'Noto Sans KR', sans-serif; font-size: 16px; font-weight: 700;
-    cursor: pointer; transition: all 0.25s; position: relative; overflow: hidden;
-  }
-  .extract-btn::before { content: ''; position: absolute; inset: 0; background: rgba(255,255,255,0.1); opacity: 0; transition: opacity 0.2s; }
-  .extract-btn:hover::before { opacity: 1; }
-  .extract-btn:active { transform: scale(0.99); }
-  .extract-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
-  /* Loading */
-  .loading {
-    display: none; flex-direction: column; align-items: center; gap: 14px; padding: 28px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    color: var(--muted); font-size: 14px;
-  }
-  .progress-wrap { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
-  .progress-bar {
-    height: 100%; width: 0%;
-    background: linear-gradient(90deg, var(--accent), var(--accent2));
-    border-radius: 2px; transition: width 0.3s ease;
-  }
-  .progress-text { font-size: 12px; color: var(--muted); }
-
-  /* Error */
-  .error-box {
-    display: none; padding: 16px 20px;
-    background: rgba(255,80,80,0.08); border: 1px solid rgba(255,80,80,0.25);
-    border-radius: var(--radius); color: #ff8080; font-size: 13px; line-height: 1.6;
-  }
-
-  /* Result */
-  .result-section {
-    display: none; background: var(--surface);
-    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
-  }
-  .result-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
-  }
-  .result-label {
-    display: flex; align-items: center; gap: 8px;
-    font-family: 'Space Mono', monospace; font-size: 11px;
-    color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
-  }
-  .result-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--success); box-shadow: 0 0 8px var(--success); animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-  .copy-btn {
-    background: none; border: 1px solid var(--border); border-radius: 6px;
-    color: var(--muted); font-size: 12px; padding: 4px 12px;
-    cursor: pointer; transition: all 0.2s; font-family: 'Noto Sans KR', sans-serif;
-  }
-  .copy-btn:hover { border-color: var(--success); color: var(--success); }
-  #resultText {
-    padding: 20px; font-size: 14px; line-height: 1.9; color: var(--text);
-    white-space: pre-wrap; word-break: break-word;
-    font-family: 'Space Mono', monospace; max-height: 420px; overflow-y: auto;
-  }
-  #resultText::-webkit-scrollbar { width: 6px; }
-  #resultText::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-  .confidence { font-size: 12px; color: var(--muted); padding: 0 20px 14px; }
-  .conf-high { color: var(--success); } .conf-mid { color: #facc15; } .conf-low { color: #f97316; }
-
-  /* Camera */
-  .camera-section {
-    display: none; background: var(--surface);
-    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
-  }
-  .camera-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface2);
-  }
-  .camera-label {
-    font-family: 'Space Mono', monospace; font-size: 11px;
-    color: var(--muted); letter-spacing: 1px; text-transform: uppercase;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4444; box-shadow: 0 0 8px #ff4444; animation: pulse 1s infinite; }
-  .close-camera-btn {
-    background: none; border: 1px solid var(--border); border-radius: 6px;
-    color: var(--muted); font-size: 12px; padding: 4px 12px;
-    cursor: pointer; transition: all 0.2s; font-family: 'Noto Sans KR', sans-serif;
-  }
-  .close-camera-btn:hover { border-color: var(--accent2); color: var(--accent2); }
-  .camera-body { position: relative; background: #000; display: flex; justify-content: center; }
-  #cameraVideo { width: 100%; max-height: 380px; object-fit: cover; display: block; }
-  .cam-guides { position: absolute; inset: 16px; pointer-events: none; }
-  .cam-guides::before,.cam-guides::after,.cam-guides span::before,.cam-guides span::after {
-    content: ''; position: absolute; width: 28px; height: 28px; border-color: var(--accent); border-style: solid;
-  }
-  .cam-guides::before{top:0;left:0;border-width:2px 0 0 2px}
-  .cam-guides::after{top:0;right:0;border-width:2px 2px 0 0}
-  .cam-guides span::before{bottom:0;left:0;border-width:0 0 2px 2px}
-  .cam-guides span::after{bottom:0;right:0;border-width:0 2px 2px 0}
-  .shutter-wrap {
-    padding: 20px; display: flex; justify-content: center;
-    background: var(--surface); border-top: 1px solid var(--border); gap: 20px; align-items: center;
-  }
-  .shutter-btn {
-    width: 64px; height: 64px; border-radius: 50%;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    border: none; cursor: pointer; position: relative; transition: transform 0.15s;
-    box-shadow: 0 0 20px rgba(124,108,255,0.4);
-  }
-  .shutter-btn::after { content:'';position:absolute;inset:5px;border-radius:50%;background:rgba(255,255,255,0.15); }
-  .shutter-btn:hover { transform: scale(1.08); } .shutter-btn:active { transform: scale(0.95); }
-  .flip-btn {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 50%;
-    width: 44px; height: 44px; color: var(--muted); font-size: 20px;
-    cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center;
-  }
-  .flip-btn:hover { border-color: var(--accent); color: var(--accent); }
-  #captureCanvas { display: none; }
-
-  .toast {
-    position: fixed; bottom: 32px; left: 50%;
-    transform: translateX(-50%) translateY(20px);
-    background: var(--surface2); border: 1px solid var(--border);
-    color: var(--text); padding: 10px 20px; border-radius: 30px;
-    font-size: 13px; opacity: 0; transition: all 0.3s; z-index: 999;
-  }
-  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-</style>
+    <meta charset="UTF-8">
+    <title>Gemini 웹 OCR</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        #result { white-space: pre-wrap; background: #f4f4f4; padding: 15px; border-radius: 8px; margin-top: 20px; min-height: 100px; }
+        .preview { max-width: 300px; margin-top: 10px; display: none; }
+    </style>
 </head>
 <body>
+    <h1>Gemini API OCR 테스트</h1>
+    
+    <input type="file" id="imageInput" accept="image/*">
+    <button onclick="runOCR()">텍스트 추출하기</button>
+    
+    <br>
+    <img id="previewImage" class="preview">
+    
+    <div id="result">이미지를 선택하고 버튼을 누르면 결과가 여기에 나타납니다.</div>
 
-<header>
-  <div class="logo">
-    <span class="logo-text">OCR.AI</span>
-    <span class="logo-badge">TESSERACT.JS · 무료</span>
-  </div>
-  <p class="subtitle">브라우저에서 직접 처리 — API 없음, 서버 전송 없음, 완전 무료</p>
-</header>
+    <script>
+        // ⚠️ 주의: 실제 서비스 시에는 API 키를 서버에 숨겨야 합니다.
+        const API_KEY = "AIzaSyBlj3Vhwbys_DtlZI9mIlL76MiEe5AOWDI"; 
+        const MODEL_NAME = "gemini-1.5-flash";
 
-<main>
-  <!-- Drop Zone -->
-  <div class="drop-zone" id="dropZone">
-    <div class="drop-icon">🖼️</div>
-    <div class="drop-title">이미지를 드래그하거나 버튼을 눌러주세요</div>
-    <div class="drop-sub">PNG · JPG · WEBP · BMP · GIF 지원<br>모든 처리는 내 브라우저 안에서만 이루어집니다</div>
-    <div class="btn-row">
-      <button class="camera-btn" onclick="openCamera()">📷 카메라로 찍기</button>
-      <button class="drop-btn" onclick="document.getElementById('fileInput').click()">📁 파일 선택</button>
-    </div>
-    <input type="file" id="fileInput" accept="image/*">
-  </div>
-
-  <!-- Camera -->
-  <div class="camera-section" id="cameraSection">
-    <div class="camera-header">
-      <div class="camera-label"><div class="rec-dot"></div> 카메라</div>
-      <button class="close-camera-btn" onclick="closeCamera()">✕ 닫기</button>
-    </div>
-    <div class="camera-body">
-      <video id="cameraVideo" autoplay playsinline muted></video>
-      <div class="cam-guides"><span></span></div>
-    </div>
-    <div class="shutter-wrap">
-      <button class="flip-btn" onclick="flipCamera()">🔄</button>
-      <button class="shutter-btn" onclick="capturePhoto()"></button>
-      <div style="width:44px"></div>
-    </div>
-  </div>
-  <canvas id="captureCanvas"></canvas>
-
-  <!-- Preview -->
-  <div class="preview-section" id="previewSection">
-    <div class="preview-header">
-      <span class="preview-label">미리보기</span>
-      <button class="clear-btn" id="clearBtn">✕ 제거</button>
-    </div>
-    <div class="preview-img-wrap">
-      <img id="previewImg" src="" alt="미리보기">
-    </div>
-  </div>
-
-  <!-- Lang Selector -->
-  <div class="lang-bar" id="langBar" style="display:none">
-    <span class="lang-label">🌐 인식 언어:</span>
-    <button class="lang-btn active" data-lang="kor+eng">🇰🇷 한+영</button>
-    <button class="lang-btn" data-lang="eng">🇺🇸 영어</button>
-    <button class="lang-btn" data-lang="jpn">🇯🇵 일본어</button>
-    <button class="lang-btn" data-lang="chi_sim">🇨🇳 중국어</button>
-  </div>
-
-  <!-- Extract Button -->
-  <button class="extract-btn" id="extractBtn" style="display:none" onclick="runOCR()">
-    텍스트 추출하기
-  </button>
-
-  <!-- Loading -->
-  <div class="loading" id="loading">
-    <span id="loadingMsg">준비 중...</span>
-    <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
-    <span class="progress-text" id="progressPct">0%</span>
-  </div>
-
-  <!-- Error -->
-  <div class="error-box" id="errorBox"></div>
-
-  <!-- Result -->
-  <div class="result-section" id="resultSection">
-    <div class="result-header">
-      <div class="result-label"><div class="result-dot"></div> 추출 결과</div>
-      <button class="copy-btn" onclick="copyText()">📋 복사</button>
-    </div>
-    <div id="resultText"></div>
-    <div class="confidence" id="confBadge"></div>
-  </div>
-</main>
-
-<div class="toast" id="toast">클립보드에 복사됐어요!</div>
-
-<script>
-  let currentImage = null;
-  let currentLang = 'kor+eng';
-  let cameraStream = null;
-  let facingMode = 'environment';
-
-  // File / Drop
-  const dropZone = document.getElementById('dropZone');
-  const fileInput = document.getElementById('fileInput');
-
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-  dropZone.addEventListener('drop', e => {
-    e.preventDefault(); dropZone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f && f.type.startsWith('image/')) loadFile(f);
-  });
-  dropZone.addEventListener('click', e => {
-    if (!e.target.classList.contains('drop-btn') && !e.target.classList.contains('camera-btn'))
-      fileInput.click();
-  });
-  fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
-
-  function loadFile(file) {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => { currentImage = img; showPreview(url); };
-    img.src = url;
-  }
-
-  function showPreview(src) {
-    document.getElementById('previewImg').src = src;
-    document.getElementById('previewSection').style.display = 'block';
-    document.getElementById('langBar').style.display = 'flex';
-    document.getElementById('extractBtn').style.display = 'block';
-    document.getElementById('resultSection').style.display = 'none';
-    document.getElementById('errorBox').style.display = 'none';
-  }
-
-  document.getElementById('clearBtn').addEventListener('click', () => {
-    currentImage = null; fileInput.value = '';
-    ['previewSection','langBar','extractBtn','resultSection','errorBox'].forEach(id => {
-      const el = document.getElementById(id);
-      el.style.display = id === 'langBar' || id === 'extractBtn' ? 'none' : 'none';
-    });
-    document.getElementById('previewSection').style.display = 'none';
-    document.getElementById('langBar').style.display = 'none';
-    document.getElementById('extractBtn').style.display = 'none';
-    document.getElementById('resultSection').style.display = 'none';
-    document.getElementById('errorBox').style.display = 'none';
-  });
-
-  // Language
-  document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      currentLang = btn.dataset.lang;
-    });
-  });
-
-  // Camera
-  async function openCamera() {
-    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
-    try {
-      cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      });
-      document.getElementById('cameraVideo').srcObject = cameraStream;
-      document.getElementById('cameraSection').style.display = 'block';
-      setTimeout(() => document.getElementById('cameraSection').scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
-    } catch (err) { alert('카메라 오류: ' + err.message); }
-  }
-
-  function closeCamera() {
-    if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
-    document.getElementById('cameraSection').style.display = 'none';
-  }
-
-  async function flipCamera() {
-    facingMode = facingMode === 'environment' ? 'user' : 'environment';
-    await openCamera();
-  }
-
-  function capturePhoto() {
-    const video = document.getElementById('cameraVideo');
-    const canvas = document.getElementById('captureCanvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    currentImage = canvas;
-    showPreview(canvas.toDataURL('image/jpeg', 0.92));
-    closeCamera();
-    setTimeout(() => document.getElementById('previewSection').scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
-  }
-
-  // OCR via Tesseract.js
-  async function runOCR() {
-    if (!currentImage) return;
-    const loading = document.getElementById('loading');
-    const progressBar = document.getElementById('progressBar');
-    const progressPct = document.getElementById('progressPct');
-    const loadingMsg = document.getElementById('loadingMsg');
-    const errorBox = document.getElementById('errorBox');
-    const resultSection = document.getElementById('resultSection');
-    const extractBtn = document.getElementById('extractBtn');
-
-    loading.style.display = 'flex';
-    resultSection.style.display = 'none';
-    errorBox.style.display = 'none';
-    extractBtn.disabled = true;
-    progressBar.style.width = '0%';
-
-    try {
-      const worker = await Tesseract.createWorker(currentLang, 1, {
-        logger: m => {
-          const msgs = {
-            'loading tesseract core': 'Tesseract 코어 로딩 중...',
-            'loading language traineddata': '언어 데이터 로딩 중...',
-            'initializing tesseract': '초기화 중...',
-            'initializing api': '준비 중...',
-            'recognizing text': '텍스트 인식 중...'
-          };
-          if (msgs[m.status]) loadingMsg.textContent = msgs[m.status];
-          if (m.progress != null) {
-            const p = Math.round(m.progress * 100);
-            progressBar.style.width = p + '%';
-            progressPct.textContent = p + '%';
-          }
+        // 파일을 Base64로 변환하는 함수
+        async function fileToGenerativePart(file) {
+            const base64EncodedDataPromise = new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(file);
+            });
+            return {
+                inline_data: { data: await base64EncodedDataPromise, mime_type: file.type },
+            };
         }
-      });
 
-      const { data } = await worker.recognize(currentImage);
-      await worker.terminate();
+        async function runOCR() {
+            const fileInput = document.getElementById('imageInput');
+            const resultDiv = document.getElementById('result');
+            const previewImg = document.getElementById('previewImage');
 
-      document.getElementById('resultText').textContent = data.text.trim() || '(인식된 텍스트가 없습니다)';
+            if (fileInput.files.length === 0) {
+                alert("이미지를 먼저 선택해주세요.");
+                return;
+            }
 
-      const conf = Math.round(data.confidence);
-      const cls = conf >= 80 ? 'conf-high' : conf >= 50 ? 'conf-mid' : 'conf-low';
-      document.getElementById('confBadge').innerHTML = `인식 정확도: <span class="${cls}">${conf}%</span>`;
+            const file = fileInput.files[0];
+            
+            // 미리보기 표시
+            previewImg.src = URL.createObjectURL(file);
+            previewImg.style.display = 'block';
 
-      resultSection.style.display = 'block';
-      setTimeout(() => resultSection.scrollIntoView({ behavior:'smooth', block:'nearest' }), 100);
-    } catch (err) {
-      errorBox.textContent = '오류: ' + err.message;
-      errorBox.style.display = 'block';
-    } finally {
-      loading.style.display = 'none';
-      extractBtn.disabled = false;
-    }
-  }
+            resultDiv.innerText = "분석 중입니다... 잠시만 기다려 주세요.";
 
-  function copyText() {
-    navigator.clipboard.writeText(document.getElementById('resultText').textContent).then(() => {
-      const t = document.getElementById('toast');
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2000);
-    });
-  }
-</script>
-</body>
-</html>
-      <div class="card center">
-        <div class="card-title">🥢 배식 횟수 선택</div>
-        <div class="count-display" id="serve-count-display">0</div>
-        <div style="display:flex; gap:10px; margin:20px 0;">
-          <button class="btn-count" onclick="setCount(1)">1</button>
-          <button class="btn-count" onclick="setCount(2)">2</button>
-          <button class="btn-count" onclick="setCount(3)">3</button>
-        </div>
-        <button class="btn btn-primary btn-full" onclick="resetAll()">배식 완료</button>
-      </div>
-    </div>
-  </div>
-  <canvas id="ocr-canvas" style="display:none;"></canvas>
-</div>
+            try {
+                const imagePart = await fileToGenerativePart(file);
+                const prompt = "이 이미지 속의 모든 글자를 읽어서 텍스트로 출력해줘.";
 
-<script>
-  let recogStream = null;
+                // API 요청 생성
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }, imagePart] }]
+                    })
+                });
 
-  // 1. 카메라 시작
-  async function initCamera() {
-    const video = document.getElementById('video-recog');
-    try {
-      recogStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      video.srcObject = recogStream;
-    } catch (e) { console.error("Camera Error", e); }
-  }
-
-  // 2. 로컬 OCR (Tesseract.js / Tensor 기반) 로직
-  async function captureAndOCR() {
-    const video = document.getElementById('video-recog');
-    const canvas = document.getElementById('ocr-canvas');
-    const btn = document.getElementById('btn-capture');
-    const statusText = document.getElementById('ocr-status-text');
-    const statusBar = document.getElementById('ocr-status-bar');
-
-    btn.disabled = true;
-    btn.textContent = '분석 중...';
-    statusBar.style.display = 'flex';
-    statusText.textContent = '로컬 엔진 초기화 중...';
-
-    // 캔버스에 캡처
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-
-    try {
-      // Tesseract Worker 생성 (한글+영어)
-      const worker = await Tesseract.createWorker('kor+eng');
-      
-      statusText.textContent = '문자 판독 중...';
-      const { data: { text } } = await worker.recognize(canvas);
-      await worker.terminate();
-
-      // 이름 정제 (한글 2~4자 추출 시도)
-      const cleaned = text.replace(/\s+/g, '');
-      const match = cleaned.match(/[가-힣]{2,4}/);
-      const name = match ? match[0] : "알수없음";
-
-      document.getElementById('ocr-result-name').textContent = name;
-      document.getElementById('ocr-result-box').classList.add('visible');
-      
-      btn.disabled = false;
-      btn.textContent = '✅ ' + name + ' (다시 찍기)';
-      document.getElementById('bar-name').textContent = name;
-      
-      // 확인 후 대시보드로 이동할 수 있게 버튼 변경
-      btn.onclick = () => {
-        document.getElementById('bar-name').textContent = name;
-        document.getElementById('bar-sub').textContent = "인증 완료";
-        goPage('dashboard');
-      };
-
-    } catch (err) {
-      console.error(err);
-      statusText.textContent = '인식 실패';
-      btn.disabled = false;
-    } finally {
-      setTimeout(() => statusBar.style.display = 'none', 2000);
-    }
-  }
-
-  // 페이지 이동 함수
-  function goPage(id) {
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById('page-' + id).classList.add('active');
-  }
-
-  function skipRecognition() {
-    document.getElementById('bar-name').textContent = "게스트";
-    goPage('dashboard');
-  }
-
-  function setCount(n) {
-    document.getElementById('serve-count-display').textContent = n;
-    document.querySelectorAll('.btn-count').forEach(b => b.classList.toggle('active', b.textContent == n));
-  }
-
-  function resetAll() {
-    alert('배식이 완료되었습니다!');
-    location.reload();
-  }
-
-  function resetOCR() {
-      document.getElementById('btn-capture').onclick = captureAndOCR;
-      document.getElementById('ocr-result-box').classList.remove('visible');
-  }
-
-  initCamera();
-</script>
+                const data = await response.json();
+                const text = data.candidates[0].content.parts[0].text;
+                
+                resultDiv.innerText = text;
+            } catch (error) {
+                console.error(error);
+                resultDiv.innerText = "오류가 발생했습니다: " + error.message;
+            }
+        }
+    </script>
 </body>
 </html>
