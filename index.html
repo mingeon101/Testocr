@@ -3,116 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Name Extractor</title>
+    <title>Gemini 3.1 Name Extractor</title>
     <style>
-        :root { --primary: #007bff; --bg: #121212; }
-        body { font-family: 'Pretendard', sans-serif; background: var(--bg); color: white; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; }
-        .container { width: 100%; max-width: 500px; text-align: center; }
-        video { width: 100%; border-radius: 16px; background: #000; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-        .controls { margin-top: 20px; }
-        button { background: var(--primary); color: white; border: none; padding: 16px 32px; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.3s; width: 100%; }
-        button:active { transform: scale(0.98); opacity: 0.8; }
-        button:disabled { background: #444; cursor: not-allowed; }
-        #resultContainer { margin-top: 25px; padding: 20px; background: #1e1e1e; border-radius: 16px; text-align: left; border: 1px solid #333; }
-        .result-title { color: var(--primary); font-size: 14px; margin-bottom: 10px; font-weight: bold; text-transform: uppercase; }
-        #resultText { font-size: 20px; line-height: 1.6; white-space: pre-wrap; }
+        body { font-family: 'Pretendard', -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
+        .app-card { width: 90%; max-width: 450px; background: #1e293b; padding: 25px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; margin-top: 20px; }
+        video { width: 100%; border-radius: 16px; background: #000; margin-bottom: 20px; border: 2px solid #38bdf8; }
+        #captureBtn { background: #38bdf8; color: #0f172a; border: none; padding: 18px; border-radius: 12px; font-size: 18px; font-weight: 800; cursor: pointer; width: 100%; transition: 0.2s; }
+        #captureBtn:active { transform: scale(0.95); }
+        #resultArea { margin-top: 20px; padding: 20px; background: #0f172a; border-radius: 16px; text-align: left; border: 1px solid #334155; }
+        .label { color: #94a3b8; font-size: 12px; font-weight: bold; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        #nameOutput { font-size: 24px; color: #38bdf8; font-weight: 700; white-space: pre-line; }
         canvas { display: none; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h2 style="margin-bottom: 10px;">👤 Name Extractor</h2>
-    <p style="color: #888; margin-bottom: 20px;">이름이 있는 곳에 카메라를 비춰주세요.</p>
-    
-    <video id="webcam" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
+<div class="app-card">
+    <h1 style="margin: 0 0 5px 0; font-size: 22px;">Gemini 3.1 Vision</h1>
+    <p style="color: #94a3b8; margin-bottom: 20px; font-size: 14px;">카메라를 이름에 비추고 버튼을 누르세요</p>
 
-    <div class="controls">
-        <button id="captureBtn">이름만 추출하기</button>
-    </div>
+    <video id="viewfinder" autoplay playsinline></video>
+    <canvas id="captureCanvas"></canvas>
 
-    <div id="resultContainer">
-        <div class="result-title">Detected Names</div>
-        <div id="resultText">대기 중...</div>
+    <button id="captureBtn">👤 이름만 추출</button>
+
+    <div id="resultArea">
+        <div class="label">Extracted Name</div>
+        <div id="nameOutput">결과 대기 중...</div>
     </div>
 </div>
 
 <script>
-    const video = document.getElementById('webcam');
-    const canvas = document.getElementById('canvas');
+    const video = document.getElementById('viewfinder');
+    const canvas = document.getElementById('captureCanvas');
     const captureBtn = document.getElementById('captureBtn');
-    const resultText = document.getElementById('resultText');
+    const output = document.getElementById('nameOutput');
 
-    // API 설정
+    // 사용자가 제공한 API 키 및 최신 Gemini 3.1 모델 설정
     const API_KEY = "AIzaSyBlj3Vhwbys_DtlZI9mIlL76MiEe5AOWDI"; 
-    const MODEL = "gemini-1.5-flash"; 
-    const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+    const MODEL = "gemini-3.1-flash"; 
+    const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
 
-    // 1. 카메라 스트림 시작
-    async function startCamera() {
+    // 카메라 설정 (후면 카메라 우선)
+    async function initCam() {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { facingMode: "environment" }, 
                 audio: false 
             });
             video.srcObject = stream;
-        } catch (err) {
-            resultText.innerText = "카메라를 켤 수 없습니다: " + err.message;
+        } catch (e) {
+            output.innerText = "카메라를 켤 수 없습니다. (HTTPS 환경인지 확인하세요)";
         }
     }
 
-    // 2. 촬영 및 이름 추출 요청
-    async function extractNames() {
+    async function extractName() {
         captureBtn.disabled = true;
-        resultText.innerText = "이름 찾는 중...";
-        resultText.style.color = "#aaa";
+        output.innerText = "Gemini 3.1 분석 중...";
 
-        // 현재 화면 캡처
+        // 1. 현재 프레임 캡처
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        const base64Img = canvas.toDataURL('image/jpeg').split(',')[1];
 
+        // 2. API 호출
         try {
-            const response = await fetch(URL, {
+            const response = await fetch(ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{
                         parts: [
-                            { 
-                                text: "이 이미지에서 '사람의 이름'만 찾아서 추출해줘. 불필요한 설명이나 인사를 제외하고 오직 이름만 리스트 형태로 답변해줘. 만약 이름이 여러 개라면 줄바꿈으로 구분해줘." 
-                            },
-                            { inline_data: { mime_type: "image/jpeg", data: base64Image } }
+                            { text: "이 이미지에서 사람 이름(Name)만 찾아서 추출해줘. 다른 설명은 하지 말고 오직 이름만 답변해." },
+                            { inline_data: { mime_type: "image/jpeg", data: base64Img } }
                         ]
                     }],
                     generationConfig: {
-                        temperature: 0.1, // 정확도를 높이기 위해 창의성 억제
-                        maxOutputTokens: 100
+                        temperature: 0.1, // 정확도 최우선
+                        topP: 1
                     }
                 })
             });
 
             const data = await response.json();
-            
-            if (data.candidates && data.candidates[0].content) {
-                const names = data.candidates[0].content.parts[0].text.trim();
-                resultText.innerText = names || "이름을 찾지 못했습니다.";
-                resultText.style.color = "#fff";
-            } else {
-                resultText.innerText = "결과가 없습니다.";
+
+            if (!response.ok) {
+                // 404 에러 등이 나면 여기서 상세 원인 출력
+                throw new Error(data.error?.message || "연결 실패");
             }
-        } catch (error) {
-            resultText.innerText = "오류: " + error.message;
+
+            if (data.candidates && data.candidates[0].content) {
+                const result = data.candidates[0].content.parts[0].text.trim();
+                output.innerText = result || "이름을 찾지 못했습니다.";
+            } else {
+                output.innerText = "텍스트 인식 실패";
+            }
+        } catch (err) {
+            output.innerText = "에러: " + err.message;
+            console.error("Full Error:", err);
         } finally {
             captureBtn.disabled = false;
         }
     }
 
-    captureBtn.addEventListener('click', extractNames);
-    startCamera();
+    captureBtn.addEventListener('click', extractName);
+    initCam();
 </script>
 
 </body>
