@@ -2,114 +2,93 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OCR</title>
+    <title>Firebase Student Lookup</title>
     <style>
-        body { font-family: 'Pretendard', -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0; }
-        .app-card { width: 90%; max-width: 450px; background: #1e293b; padding: 25px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; margin-top: 20px; }
-        video { width: 100%; border-radius: 16px; background: #000; margin-bottom: 20px; border: 2px solid #38bdf8; }
-        #captureBtn { background: #38bdf8; color: #0f172a; border: none; padding: 18px; border-radius: 12px; font-size: 18px; font-weight: 800; cursor: pointer; width: 100%; transition: 0.2s; }
-        #captureBtn:active { transform: scale(0.95); }
-        #resultArea { margin-top: 20px; padding: 20px; background: #0f172a; border-radius: 16px; text-align: left; border: 1px solid #334155; }
-        .label { color: #94a3b8; font-size: 12px; font-weight: bold; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
-        #nameOutput { font-size: 24px; color: #38bdf8; font-weight: 700; white-space: pre-line; }
-        canvas { display: none; }
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; max-width: 600px; margin: auto; }
+        .section { border: 1px solid #ddd; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        input { display: block; width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        #result { background: #f8f9fa; padding: 15px; border-radius: 4px; white-space: pre-wrap; }
+        h2 { margin-top: 0; color: #333; }
     </style>
 </head>
 <body>
 
-<div class="app-card">
-    <h1 style="margin: 0 0 5px 0; font-size: 22px;">Gemini 3.1 Vision</h1>
-    <p style="color: #94a3b8; margin-bottom: 20px; font-size: 14px;">카메라를 이름에 비추고 버튼을 누르세요</p>
+    <h2>══════════════════<br>STUDENT LOOKUP SYSTEM<br>══════════════════</h2>
 
-    <video id="viewfinder" autoplay playsinline></video>
-    <canvas id="captureCanvas"></canvas>
-
-    <button id="captureBtn">👤 이름만 추출</button>
-
-    <div id="resultArea">
-        <div class="label">Extracted Name</div>
-        <div id="nameOutput">결과 대기 중...</div>
+    <div class="section">
+        <h3>학생 등록</h3>
+        <input type="text" id="uid" placeholder="UID (예: 2024001)">
+        <input type="text" id="name" placeholder="이름 (예: 홍길동)">
+        <input type="number" id="grade" placeholder="학년">
+        <input type="number" id="class" placeholder="반">
+        <input type="number" id="number" placeholder="번호">
+        <button onclick="addStudent()">학생 정보 저장</button>
     </div>
-</div>
 
-<script>
-    const video = document.getElementById('viewfinder');
-    const canvas = document.getElementById('captureCanvas');
-    const captureBtn = document.getElementById('captureBtn');
-    const output = document.getElementById('nameOutput');
+    <div class="section">
+        <h3>이름으로 검색</h3>
+        <input type="text" id="searchName" placeholder="검색할 이름을 입력하세요">
+        <button onclick="lookupStudent()">조회하기</button>
+        <div id="result">검색 결과가 여기에 표시됩니다.</div>
+    </div>
 
-    // 사용자가 제공한 API 키 및 최신 Gemini 3.1 모델 설정
-    const API_KEY = "AIzaSyBlj3Vhwbys_DtlZI9mIlL76MiEe5AOWDI"; 
-    const MODEL = "gemini-3.1-flash-lite-preview"; 
-    const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, set, get, query, orderByChild, equalTo } 
+        from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // 카메라 설정 (후면 카메라 우선)
-    async function initCam() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: "environment" }, 
-                audio: false 
-            });
-            video.srcObject = stream;
-        } catch (e) {
-            output.innerText = "카메라를 켤 수 없습니다. (HTTPS 환경인지 확인하세요)";
-        }
-    }
+        // Firebase 설정 (본인의 Config 정보가 있다면 교체하세요)
+        const firebaseConfig = {
+            databaseURL: "https://smart-cafeteria-8a2ce-default-rtdb.firebaseio.com/"
+        };
 
-    async function extractName() {
-        captureBtn.disabled = true;
-        output.innerText = "Gemini 3.1 분석 중...";
+        const app = initializeApp(firebaseConfig);
+        const database = getDatabase(app);
 
-        // 1. 현재 프레임 캡처
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
-        const base64Img = canvas.toDataURL('image/jpeg').split(',')[1];
+        // 1. 학생 추가 기능
+        window.addStudent = function() {
+            const uid = document.getElementById('uid').value;
+            const data = {
+                name: document.getElementById('name').value,
+                grade: parseInt(document.getElementById('grade').value),
+                class: parseInt(document.getElementById('class').value),
+                number: parseInt(document.getElementById('number').value)
+            };
 
-        // 2. API 호출
-        try {
-            const response = await fetch(ENDPOINT, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: "이 이미지에서 사람 이름(Name)만 찾아서 추출해줘. 다른 설명은 하지 말고 오직 이름만 답변해." },
-                            { inline_data: { mime_type: "image/jpeg", data: base64Img } }
-                        ]
-                    }],
-                    generationConfig: {
-                        temperature: 0.1, // 정확도 최우선
-                        topP: 1
-                    }
+            if(!uid || !data.name) return alert("UID와 이름을 입력하세요!");
+
+            set(ref(database, 'students/' + uid), data)
+                .then(() => {
+                    alert("성공적으로 저장되었습니다!");
+                    document.querySelectorAll('input').forEach(i => i.value = "");
                 })
+                .catch(err => alert("에러 발생: " + err.message));
+        };
+
+        // 2. 학생 검색 기능
+        window.lookupStudent = function() {
+            const searchName = document.getElementById('searchName').value;
+            const studentsRef = ref(database, 'students');
+            const nameQuery = query(studentsRef, orderByChild('name'), equalTo(searchName));
+
+            get(nameQuery).then((snapshot) => {
+                if (snapshot.exists()) {
+                    let output = `🔍 '${searchName}' 검색 결과:\n\n`;
+                    const data = snapshot.val();
+                    for (let id in data) {
+                        output += `[UID: ${id}]\n`;
+                        output += `📍 정보: ${data[id].grade}학년 ${data[id].class}반 ${data[id].number}번\n\n`;
+                    }
+                    document.getElementById('result').innerText = output;
+                } else {
+                    document.getElementById('result').innerText = "❌ 검색 결과가 없습니다.";
+                }
+            }).catch(err => {
+                document.getElementById('result').innerText = "에러: " + err.message;
             });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                // 404 에러 등이 나면 여기서 상세 원인 출력
-                throw new Error(data.error?.message || "연결 실패");
-            }
-
-            if (data.candidates && data.candidates[0].content) {
-                const result = data.candidates[0].content.parts[0].text.trim();
-                output.innerText = result || "이름을 찾지 못했습니다.";
-            } else {
-                output.innerText = "텍스트 인식 실패";
-            }
-        } catch (err) {
-            output.innerText = "에러: " + err.message;
-            console.error("Full Error:", err);
-        } finally {
-            captureBtn.disabled = false;
-        }
-    }
-
-    captureBtn.addEventListener('click', extractName);
-    initCam();
-</script>
-
+        };
+    </script>
 </body>
 </html>
